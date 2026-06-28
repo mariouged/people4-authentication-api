@@ -1,4 +1,4 @@
-module authorization-api
+module authentication-api
 
 go 1.26.1
 
