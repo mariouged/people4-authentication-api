@@ -129,7 +129,7 @@ func generateJWT(username string, secret []byte) (string, error) {
 func isValidClientKey(incoming ssh.PublicKey) bool {
 	path := os.Getenv("AUTHORIZED_KEYS_FILE")
 	if path == "" {
-		path = "authorized_keys"
+		path = "db/authorized_keys"
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -189,6 +189,10 @@ func handleConnection(nConn net.Conn, config *ssh.ServerConfig) {
 
 					if _, err := ch.Write(resp); err != nil {
 						log.Printf("Failed to write token to channel: %v", err)
+					}
+					// Signal clean exit so SSH clients receive a proper exit status.
+					if _, err := ch.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0})); err != nil {
+						log.Printf("Failed to send exit-status: %v", err)
 					}
 					return
 				}

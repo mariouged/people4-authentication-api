@@ -1,5 +1,6 @@
 # TEST
 
+go test ./test/ -v
 
 ## Step 1 — Generate a test key pair (one-time)
 
