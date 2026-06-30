@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	jwt "github.com/golang-jwt/jwt/v5"
@@ -71,12 +72,13 @@ func main() {
 	config := &ssh.ServerConfig{
 		PublicKeyCallback: func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
 			// 1. Validate the key against your registry / database.
-			if !isValidClientKey(key) {
+			label, ok := isValidClientKey(key)
+			if !ok {
 				return nil, fmt.Errorf("unauthorized public key")
 			}
 
 			// 3. Generate the JWT.
-			tokenString, err := generateJWT(conn.User(), jwtSecret)
+			tokenString, err := generateJWT(conn.User(), label, jwtSecret)
 			if err != nil {
 				return nil, fmt.Errorf("failed to generate token: %w", err)
 			}
@@ -114,19 +116,20 @@ func main() {
 	}
 }
 
-func generateJWT(username string, secret []byte) (string, error) {
+func generateJWT(username, label string, secret []byte) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": username,
-		"exp": time.Now().Add(time.Hour).Unix(),
-		"iss": "custom-ssh-auth-server",
+		"sub":    username,
+		"exp":    time.Now().Add(time.Hour).Unix(),
+		"iss":    "custom-ssh-auth-server",
+		"seller": strings.ReplaceAll(label, "@", "_"),
 	})
 	return token.SignedString(secret)
 }
 
 // isValidClientKey checks whether the supplied public key is authorized.
-// It reads from the file defined by AUTHORIZED_KEYS_FILE (default: authorized_keys).
-// Replace with a real database lookup for production use.
-func isValidClientKey(incoming ssh.PublicKey) bool {
+// It reads from the file defined by AUTHORIZED_KEYS_FILE (default: db/authorized_keys).
+// Returns the key comment (label, e.g. "user@host") and true when authorized.
+func isValidClientKey(incoming ssh.PublicKey) (string, bool) {
 	path := os.Getenv("AUTHORIZED_KEYS_FILE")
 	if path == "" {
 		path = "db/authorized_keys"
@@ -134,22 +137,20 @@ func isValidClientKey(incoming ssh.PublicKey) bool {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		log.Printf("Could not read authorized keys file %q: %v", path, err)
-		return false
+		return "", false
 	}
-	// ssh.ParseAuthorizedKey handles comments and options correctly;
-	// we compare raw key bytes so the comment field is ignored.
 	rest := data
 	for len(rest) > 0 {
-		pubKey, _, _, remaining, err := ssh.ParseAuthorizedKey(rest)
+		pubKey, comment, _, remaining, err := ssh.ParseAuthorizedKey(rest)
 		if err != nil {
 			break
 		}
 		rest = remaining
 		if bytes.Equal(pubKey.Marshal(), incoming.Marshal()) {
-			return true
+			return comment, true
 		}
 	}
-	return false
+	return "", false
 }
 
 func handleConnection(nConn net.Conn, config *ssh.ServerConfig) {
